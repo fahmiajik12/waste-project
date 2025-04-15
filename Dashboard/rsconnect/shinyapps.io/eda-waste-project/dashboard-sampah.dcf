@@ -1,0 +1,10 @@
+name: dashboard-sampah
+title:
+username: eda-waste-project
+account: eda-waste-project
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14523297
+bundleId: 10116156
+url: https://eda-waste-project.shinyapps.io/dashboard-sampah/
+version: 1

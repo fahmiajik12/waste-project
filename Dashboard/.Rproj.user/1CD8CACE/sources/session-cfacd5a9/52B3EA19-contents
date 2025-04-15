@@ -1,0 +1,207 @@
+library(shiny)
+library(shinydashboard)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(DT)
+library(RColorBrewer)
+library(lubridate)
+library(tensorflow)
+library(keras)
+library(tidyr)
+
+# Inisialisasi UI
+ui <- dashboardPage(
+  skin = "blue",
+  dashboardHeader(title = "📊 EDA Sampah Dashboard"),
+  
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem(" Ringkasan", tabName = "summary", icon = icon("chart-line")),
+      menuItem(" Visualisasi", tabName = "visuals", icon = icon("chart-bar")),
+      menuItem(" Tabel Data", tabName = "tabledata", icon = icon("table")),
+      fileInput("file", "Upload File Excel (.xlsx)", accept = ".xlsx"),
+      uiOutput("year_ui"),
+      uiOutput("jenis_sampah_ui"),
+      actionButton("train_lstm", "Train LSTM", icon = icon("cogs"))
+    )
+  ),
+  
+  dashboardBody(
+    tabItems(
+      # Ringkasan
+      tabItem(tabName = "summary",
+              fluidRow(
+                valueBoxOutput("total_netto", width = 3),
+                valueBoxOutput("rata_netto", width = 3),
+                valueBoxOutput("max_netto", width = 3),
+                valueBoxOutput("jumlah_kecamatan", width = 3),
+                valueBoxOutput("jumlah_supplier", width = 3)
+              ),
+              fluidRow(
+                box(plotlyOutput("trend_sampah", height = "700px"), width = 12, title = "Trend Bulanan Sampah", status = "primary", solidHeader = TRUE)
+              )
+      ),
+      
+      # Visualisasi
+      tabItem(tabName = "visuals",
+              tabsetPanel(
+                tabPanel("Total Sampah per Kecamatan",
+                         fluidRow(
+                           box(plotlyOutput("barplot_interaktif", height = "700px"), width = 12, title = "Total Sampah per Kecamatan", status = "info", solidHeader = TRUE)
+                         )
+                ),
+                tabPanel("Boxplot per jenis sampah dan Supplier",
+                         fluidRow(
+                           box(plotlyOutput("boxplot_interaktif", height = "700px"), width = 12, title = "Boxplot per jenis sampah dan Supplier", status = "info", solidHeader = TRUE)
+                         )
+                ),
+                tabPanel("Distribusi Sampah jenis sampah",
+                         fluidRow(
+                           box(plotlyOutput("barplot_jenis_sampah", height = "700px"), width = 12, title = "Distribusi Sampah jenis sampah", status = "warning", solidHeader = TRUE)
+                         )
+                ),
+                tabPanel("Prediksi Sampah Tahunan",
+                         fluidRow(
+                           box(plotlyOutput("lstm_predictions", height = "700px"), width = 12, title = "Prediksi Sampah Tahunan", status = "info", solidHeader = TRUE)
+                         )
+                )
+              )
+      ),
+      
+      # Tabel Data
+      tabItem(tabName = "tabledata",
+              fluidRow(
+                box(DTOutput("table"), width = 12, title = "All Data", status = "success")
+              )
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  df <- reactive({
+    req(input$file)
+    data <- read_excel(input$file$datapath)
+    
+    required_cols <- c("Tanggal", "Hari", "Bulan", "Tahun", "No. Polisi", "jenis_sampah", "SUPPLIER", "Netto_kg", "Jam", "Sopir", "Admin", "Kecamatan", "Musim")
+    validate(need(all(required_cols %in% colnames(data)), "Kolom tidak lengkap."))
+    
+    data <- data %>%
+      mutate(
+        Tahun = as.character(Tahun),
+        Bulan = as.integer(Bulan),
+        Kecamatan = trimws(Kecamatan),
+        Musim = trimws(Musim),
+        jenis_sampah = trimws(jenis_sampah),
+        Tanggal = as.Date(Tanggal)
+      )
+    
+    return(na.omit(data))
+  })
+  
+  output$year_ui <- renderUI({
+    req(df())
+    selectInput("tahun", "Filter Tahun", choices = c("ALL", unique(df()$Tahun)), multiple = TRUE, selected = unique(df()$Tahun))
+  })
+  
+  output$jenis_sampah_ui <- renderUI({
+    req(df())
+    selectInput("jenis_sampah", "Filter Jenis Sampah", choices = c("ALL", unique(df()$jenis_sampah)), multiple = TRUE, selected = unique(df()$jenis_sampah))
+  })
+  
+  filtered_data <- reactive({
+    data <- df()
+    if (!"ALL" %in% input$tahun) data <- data %>% filter(Tahun %in% input$tahun)
+    if (!"ALL" %in% input$jenis_sampah) data <- data %>% filter(jenis_sampah %in% input$jenis_sampah)
+    return(data)
+  })
+  
+  # Train LSTM model when button is pressed
+  observeEvent(input$train_lstm, {
+    
+    # Persiapkan data untuk model LSTM
+    data_lstm <- filtered_data() %>%
+      group_by(Tahun, Bulan) %>%
+      summarise(Netto = sum(Netto_kg)) %>%
+      ungroup()
+    
+    # Membuat dataset untuk training
+    data_lstm <- data_lstm %>%
+      mutate(Date = as.Date(paste(Tahun, Bulan, "01", sep = "-"))) %>%
+      arrange(Date)
+    
+    # Menyiapkan data untuk LSTM
+    X <- data_lstm$Netto
+    y <- X
+    
+    # Normalisasi data
+    X_scaled <- scale(X)
+    
+    # Membagi data menjadi training dan test
+    train_size <- floor(0.8 * length(X_scaled))
+    X_train <- X_scaled[1:train_size]
+    y_train <- y[1:train_size]
+    X_test <- X_scaled[(train_size + 1):length(X_scaled)]
+    y_test <- y[(train_size + 1):length(y)]
+    
+    # Ubah data menjadi bentuk 3D untuk input LSTM
+    X_train <- array(X_train, dim = c(length(X_train), 1, 1))
+    X_test <- array(X_test, dim = c(length(X_test), 1, 1))
+    
+    # Membangun model LSTM
+    model <- keras_model_sequential() %>%
+      layer_lstm(units = 50, return_sequences = TRUE, input_shape = c(1, 1)) %>%
+      layer_dropout(0.2) %>%
+      layer_lstm(units = 50, return_sequences = TRUE) %>%
+      layer_dropout(0.2) %>%
+      layer_lstm(units = 50, return_sequences = TRUE) %>%
+      layer_dropout(0.2) %>%
+      layer_lstm(units = 50) %>%
+      layer_dropout(0.2) %>%
+      layer_dense(units = 1)
+    
+    # Menyusun model
+    model %>% compile(
+      loss = 'mean_squared_error',
+      optimizer = 'adam'
+    )
+    
+    # Melatih model dengan epoch dan batch_size yang berbeda
+    history <- model %>% fit(
+      X_train, y_train, 
+      epochs = 20, batch_size = 32, 
+      validation_data = list(X_test, y_test)
+    )
+    
+    # Prediksi hasil
+    predictions <- model %>% predict(X_test)
+    
+    # Visualisasikan hasil prediksi
+    output$lstm_predictions <- renderPlotly({
+      data_plot <- data.frame(
+        Date = data_lstm$Date[(train_size + 1):length(data_lstm$Date)],
+        Actual = y_test,
+        Predicted = predictions
+      )
+      
+      p <- ggplot(data_plot, aes(x = Date)) +
+        geom_line(aes(y = Actual, color = 'Actual'), size = 1.2) +
+        geom_line(aes(y = Predicted, color = 'Predicted'), size = 1.2, linetype = "dashed") +
+        labs(title = "Prediksi Sampah Tahunan", x = "Tanggal", y = "Netto (kg)") +
+        theme_minimal()
+      
+      ggplotly(p)
+    })
+  })
+  
+  # Menampilkan data
+  output$table <- renderDT({
+    datatable(filtered_data(), options = list(pageLength = 10, scrollX = TRUE))
+  })
+}
+
+shinyApp(ui, server)
