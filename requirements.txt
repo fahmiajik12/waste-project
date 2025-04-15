@@ -6,3 +6,4 @@ tensorflow
 scikit-learn
 plotly
 seaborn
+openpyxl
