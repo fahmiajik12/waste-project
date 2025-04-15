@@ -10,7 +10,7 @@ import seaborn as sns
 
 # Set page configuration
 st.set_page_config(layout="wide")
-st.title("📈 Prediksi Volume Sampah Harian - Kota Magelang")
+st.title("Prediksi Volume Sampah Harian - Kota Magelang")
 
 # ================================
 # Fungsi: Load model LSTM
@@ -167,7 +167,7 @@ if uploaded_file is not None:
     mse = mean_squared_error(y_actual, y_pred)
     mae = mean_absolute_error(y_actual, y_pred)
 
-    st.header("📉 Evaluasi Model")
+    st.header("Evaluasi Model")
     st.metric("MSE (Mean Squared Error)", f"{mse:.2f}")
     st.metric("MAE (Mean Absolute Error)", f"{mae:.2f}")
 
@@ -184,7 +184,7 @@ if uploaded_file is not None:
         'Prediksi': seasonal_pred
     })
 
-    st.header("🌦️ Heatmap Perbandingan Volume Sampah (Musim Hujan vs Kemarau)")
+    st.header("Heatmap Perbandingan Volume Sampah (Musim Hujan vs Kemarau)")
     fig, ax = plt.subplots(figsize=(6, 4))
     sns.heatmap(heatmap_data.T, annot=True, cmap='YlGnBu', fmt='.2f', cbar=True, ax=ax)
     ax.set_title(f"Perbandingan Volume Sampah (Aktual vs Prediksi) per Musim - Tahun {selected_year}")
