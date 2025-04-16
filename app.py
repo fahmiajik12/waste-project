@@ -5,10 +5,8 @@ import plotly.express as px
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import load_model
 
-# Set page configuration
 st.set_page_config(page_title="EDA Sampah Dashboard", layout="wide", page_icon="♻️")
 
-# Custom styling for Streamlit
 st.markdown(
     """
     <style>
@@ -31,12 +29,12 @@ st.markdown(
 # Sidebar
 st.sidebar.markdown('<div class="sidebar-title">EDA Sampah Dashboard</div>', unsafe_allow_html=True)
 uploaded_file = st.sidebar.file_uploader("Upload File Excel (.xlsx)", type="xlsx")
-model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN", "GRU"])
+model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN", "XGBoost", "Random Forest"])
 prediction_years = st.sidebar.multiselect("Tahun Prediksi", options=[2022, 2023, 2024, 2025, 2026], default=[2025])
 months_to_predict = st.sidebar.slider("Jumlah Bulan Prediksi", min_value=1, max_value=24, value=12)
 run_prediction = st.sidebar.button("Jalankan Prediksi")
 
-# Function to preprocess the data
+# Preprocess the data
 def preprocess_data(data):
     required_cols = ["Tanggal", "Hari", "Bulan", "Tahun", "No_Polisi", "jenis_sampah", "Suplier", 
                      "Netto_kg", "Jam", "Sopir", "Admin", "Kecamatan", "Musim"]
@@ -56,7 +54,7 @@ def preprocess_data(data):
     data["jenis_sampah"] = data["jenis_sampah"].str.strip()
     return data.dropna()
 
-# Function to filter data
+# Filter data
 def filter_data(data, years, jenis_sampah):
     if years and "ALL" not in years:
         data = data[data["Tahun"].isin(years)]
@@ -64,28 +62,27 @@ def filter_data(data, years, jenis_sampah):
         data = data[data["jenis_sampah"].isin(jenis_sampah)]
     return data
 
-# Function to load Keras model
+# load Keras model
 def load_keras_model(model_type):
     model_path = "best_lstm_model.h5" if model_type == "LSTM" else "best_rnn_model.h5"
     model = load_model(model_path, compile=False)
     model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mean_squared_error"])
     return model
 
-# Main content
+# Main 
 if uploaded_file:
     # Load and preprocess data
     df = pd.read_excel(uploaded_file)
     df = preprocess_data(df)
     
     if df is not None:
-        # Update sidebar filters
+        # Sidebar filter
         year_filter = st.sidebar.multiselect("Filter Tahun", options=["ALL"] + sorted(df["Tahun"].unique().tolist()), default=["ALL"])
         jenis_sampah_filter = st.sidebar.multiselect("Filter Jenis Sampah", options=["ALL"] + sorted(df["jenis_sampah"].unique().tolist()), default=["ALL"])
         
         # Filter data
         filtered_data = filter_data(df, year_filter, jenis_sampah_filter)
 
-        # Summary metrics
         st.markdown("### Ringkasan Data")
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -99,7 +96,7 @@ if uploaded_file:
         with col5:
             st.metric("Jumlah Suplier", filtered_data["Suplier"].nunique())
 
-        # Heatmap of Contributions by Kecamatan and Musim for All Years (Displayed Horizontally)
+        # Heatmap 
         st.markdown("### Heatmap Musim, Kecamatan, dan Total Sumbangsih Sampah per Tahun (Horizontal)")
         heatmap_data = (
             filtered_data.groupby(["Tahun", "Kecamatan", "Musim"], as_index=False)
@@ -150,7 +147,7 @@ if uploaded_file:
         )
         st.plotly_chart(fig_boxplot, use_container_width=True)
 
-        # Prediction
+        # Prediksi (dev)
         if run_prediction:
             st.markdown("### Prediksi Volume Sampah")
             prediction_data = (
@@ -160,7 +157,6 @@ if uploaded_file:
             scaler = MinMaxScaler()
             scaled_data = scaler.fit_transform(prediction_data[["Netto_kg"]])
 
-            # Prepare input sequence
             window_size = 12
             if len(scaled_data) >= window_size:
                 input_sequence = np.array([scaled_data[-window_size:]])
@@ -172,17 +168,13 @@ if uploaded_file:
                     pred_reshaped = np.reshape(pred, (1, 1, -1))
                     input_sequence = np.append(input_sequence[:, 1:, :], pred_reshaped, axis=1)
 
-                # Rescale predictions
                 predictions_rescaled = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
                 
-                # Generate valid future dates
                 start_date = pd.Timestamp(year=prediction_years[0], month=1, day=1)
                 pred_dates = pd.date_range(start=start_date, periods=months_to_predict, freq="M")
 
-                # Create prediction DataFrame
                 prediction_df = pd.DataFrame({"Tanggal": pred_dates, "Prediksi_Netto_kg": predictions_rescaled.flatten()})
                 
-                # Show predictions
                 fig_prediction = px.line(
                     prediction_df, x="Tanggal", y="Prediksi_Netto_kg", 
                     title="Prediksi Volume Sampah",
