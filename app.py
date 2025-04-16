@@ -64,7 +64,7 @@ def filter_data(data, years, jenis_sampah):
 
 # load Keras model
 def load_keras_model(model_type):
-    model_path = "best_lstm_model.h5" if model_type == "LSTM" else "best_rnn_model.h5"
+    model_path = "best_lstm_model.h5" if model_type == "LSTM" else "best_gru_model.h5"
     model = load_model(model_path, compile=False)
     model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mean_squared_error"])
     return model
