@@ -1,191 +1,195 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from keras.models import load_model
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+import plotly.express as px
 from sklearn.preprocessing import MinMaxScaler
-import plotly.graph_objects as go
-import seaborn as sns
+from tensorflow.keras.models import load_model
 
 # Set page configuration
-st.set_page_config(layout="wide")
-st.title("Prediksi Volume Sampah Harian - Kota Magelang")
+st.set_page_config(page_title="EDA Sampah Dashboard", layout="wide", page_icon="♻️")
 
-# ================================
-# Fungsi: Load model LSTM
-# ================================
-@st.cache_resource
-def load_lstm_model():
-    return load_model("model_lstm_volume_sampah_terbaik.h5", compile=False)
+# Custom styling for Streamlit
+st.markdown(
+    """
+    <style>
+    .metric-container {
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    .sidebar-title {
+        font-size: 20px;
+        font-weight: bold;
+        color: #4CAF50;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# ================================
-# Upload File dan Pilih Tahun
-# ================================
-st.header("Upload Dataset dan Pilih Tahun untuk Prediksi")
+# Sidebar
+st.sidebar.markdown('<div class="sidebar-title">EDA Sampah Dashboard</div>', unsafe_allow_html=True)
+uploaded_file = st.sidebar.file_uploader("Upload File Excel (.xlsx)", type="xlsx")
+model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN", "XGBoost", "Random Forest"])
+prediction_years = st.sidebar.multiselect("Tahun Prediksi", options=[2022, 2023, 2024, 2025, 2026], default=[2025])
+months_to_predict = st.sidebar.slider("Jumlah Bulan Prediksi", min_value=1, max_value=24, value=12)
+run_prediction = st.sidebar.button("Jalankan Prediksi")
 
-uploaded_file = st.file_uploader("Unggah File Dataset (.xlsx)", type=["xlsx"])
-
-# Memastikan file diupload
-if uploaded_file is not None:
-    # Membaca dataset
-    df = pd.read_excel(uploaded_file)
-    df.columns = df.columns.str.strip().str.lower()
-    df['tanggal'] = pd.to_datetime(df['tanggal'], dayfirst=True, errors='coerce')
-    df = df.sort_values("tanggal")
+# Function to preprocess the data
+def preprocess_data(data):
+    required_cols = ["Tanggal", "Hari", "Bulan", "Tahun", "No_Polisi", "jenis_sampah", "Suplier", 
+                     "Netto_kg", "Jam", "Sopir", "Admin", "Kecamatan", "Musim"]
+    if not all(col in data.columns for col in required_cols):
+        st.error("Kolom tidak lengkap.")
+        return None
     
-    # Menampilkan ringkasan data
-    st.header("Ringkasan Data")
-    st.write(df.describe())
+    try:
+        data["Tanggal"] = pd.to_datetime(data["Tanggal"], format="%d/%m/%Y")
+    except ValueError:
+        data["Tanggal"] = pd.to_datetime(data["Tanggal"], dayfirst=True)
+    
+    data["Tahun"] = data["Tahun"].astype(str)
+    data["Bulan"] = data["Bulan"].astype(int)
+    data["Kecamatan"] = data["Kecamatan"].str.strip()
+    data["Musim"] = data["Musim"].str.strip()
+    data["jenis_sampah"] = data["jenis_sampah"].str.strip()
+    return data.dropna()
 
-    # Menampilkan supplier sampah (asumsi kolom 'supplier' ada)
-    if 'supplier' in df.columns:
-        st.subheader("Supplier Sampah")
-        supplier_counts = df['supplier'].value_counts()
-        st.write(supplier_counts)
-    else:
-        st.warning("Kolom 'supplier' tidak ditemukan dalam dataset.")
+# Function to filter data
+def filter_data(data, years, jenis_sampah):
+    if years and "ALL" not in years:
+        data = data[data["Tahun"].isin(years)]
+    if jenis_sampah and "ALL" not in jenis_sampah:
+        data = data[data["jenis_sampah"].isin(jenis_sampah)]
+    return data
 
-    # Pilih Tahun untuk Prediksi
-    years = df['tanggal'].dt.year.unique()
-    selected_year = st.selectbox("Pilih Tahun untuk Prediksi", ['ALL'] + list(map(str, years)))
+# Function to load Keras model
+def load_keras_model(model_type):
+    model_path = "best_lstm_model.h5" if model_type == "LSTM" else "best_rnn_model.h5"
+    model = load_model(model_path, compile=False)
+    model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mean_squared_error"])
+    return model
 
-    # ================================
-    # Filter Data Berdasarkan Tahun
-    # ================================
-    if selected_year != 'ALL':
-        df = df[df['tanggal'].dt.year == int(selected_year)]
+# Main content
+if uploaded_file:
+    # Load and preprocess data
+    df = pd.read_excel(uploaded_file)
+    df = preprocess_data(df)
+    
+    if df is not None:
+        # Update sidebar filters
+        year_filter = st.sidebar.multiselect("Filter Tahun", options=["ALL"] + sorted(df["Tahun"].unique().tolist()), default=["ALL"])
+        jenis_sampah_filter = st.sidebar.multiselect("Filter Jenis Sampah", options=["ALL"] + sorted(df["jenis_sampah"].unique().tolist()), default=["ALL"])
+        
+        # Filter data
+        filtered_data = filter_data(df, year_filter, jenis_sampah_filter)
 
-    # ================================
-    # Preprocessing dan Prediksi
-    # ================================
-    df_selected_year = df.copy()
+        # Summary metrics
+        st.markdown("### Ringkasan Data")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Total Sampah (kg)", f"{filtered_data['Netto_kg'].sum():,.0f}")
+        with col2:
+            st.metric("Rata-rata Netto (kg)", f"{filtered_data['Netto_kg'].mean():,.2f}")
+        with col3:
+            st.metric("Netto Tertinggi (kg)", f"{filtered_data['Netto_kg'].max():,.0f}")
+        with col4:
+            st.metric("Jumlah Kecamatan", filtered_data["Kecamatan"].nunique())
+        with col5:
+            st.metric("Jumlah Suplier", filtered_data["Suplier"].nunique())
 
-    # Preprocessing
-    data_selected_year = df_selected_year['netto_kg'].values.reshape(-1, 1)
-    scaler = MinMaxScaler()
-    data_scaled = scaler.fit_transform(data_selected_year)
-
-    # Buat input sequence untuk LSTM (window 30 hari)
-    window_size = 30
-    X = []
-    y = []
-    for i in range(window_size, len(data_scaled)):
-        X.append(data_scaled[i-window_size:i])
-        y.append(data_scaled[i])
-    X, y = np.array(X), np.array(y)
-
-    # Load Model LSTM
-    model = load_lstm_model()
-
-    # Prediksi
-    y_pred_scaled = model.predict(X)
-    y_pred = scaler.inverse_transform(y_pred_scaled)
-    y_actual = scaler.inverse_transform(y)
-
-    # ================================
-    # Menambahkan kolom aktual dan prediksi ke DataFrame
-    # ================================
-    df_pred = df_selected_year.iloc[window_size:].copy()
-    df_pred["aktual"] = y_actual.flatten()
-    df_pred["prediksi"] = y_pred.flatten()
-
-    # ================================
-    # Filter untuk melihat data per Bulan, Tahun, atau Hari
-    # ================================
-    st.sidebar.header("Pilih Periode Tampilan Data")
-    period_choice = st.sidebar.selectbox("Pilih Periode", ["Bulan", "Tahun", "Hari"])
-
-    # ================================
-    # Visualisasi berdasarkan pilihan periode
-    # ================================
-    if period_choice == "Bulan":
-        df_pred_monthly = df_pred.copy()
-        df_pred_monthly['bulan'] = df_pred_monthly['tanggal'].dt.month
-
-        monthly_actual = df_pred_monthly.groupby('bulan')['aktual'].sum()
-        monthly_pred = df_pred_monthly.groupby('bulan')['prediksi'].sum()
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=monthly_actual.index, y=monthly_actual.values,
-            mode='lines+markers', name='Aktual', line=dict(color='blue', width=2)
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=monthly_pred.index, y=monthly_pred.values,
-            mode='lines+markers', name='Prediksi', line=dict(color='orange', width=2)
-        ))
-
-        fig.update_layout(
-            title=f"Prediksi vs Aktual Volume Sampah per Bulan (Tahun {selected_year})",
-            xaxis=dict(tickmode='array', tickvals=np.arange(1, 13), ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]),
-            xaxis_title="Bulan",
-            yaxis_title="Volume Sampah (kg)",
-            showlegend=True,
-            template="plotly_dark"
+        # Heatmap of Contributions by Kecamatan and Musim for All Years (Displayed Horizontally)
+        st.markdown("### Heatmap Musim, Kecamatan, dan Total Sumbangsih Sampah per Tahun (Horizontal)")
+        heatmap_data = (
+            filtered_data.groupby(["Tahun", "Kecamatan", "Musim"], as_index=False)
+            .agg({"Netto_kg": "sum"})
         )
-        st.plotly_chart(fig)
+        fig_heatmap = px.density_heatmap(
+            heatmap_data,
+            x="Musim",
+            y="Kecamatan",
+            z="Netto_kg",
+            facet_col="Tahun",
+            color_continuous_scale="Viridis",
+            title="Total Sumbangsih Sampah Berdasarkan Musim dan Kecamatan per Tahun",
+            labels={"Netto_kg": "Total Sampah (kg)", "Musim": "Musim", "Kecamatan": "Kecamatan"}
+        )
+        st.plotly_chart(fig_heatmap, use_container_width=True)
 
-    elif period_choice == "Tahun":
-        df_pred_yearly = df_pred.copy()
-        df_pred_yearly['tahun'] = df_pred_yearly['tanggal'].dt.year
+        # Barplot per Kecamatan
+        st.markdown("### Total Sampah per Kecamatan")
+        kecamatan_data = (
+            filtered_data.groupby(["Kecamatan", "Musim", "Tahun"], as_index=False)
+            .agg({"Netto_kg": "sum"})
+        )
+        fig_bar_kecamatan = px.bar(
+            kecamatan_data, x="Kecamatan", y="Netto_kg", color="Musim", 
+            barmode="group", facet_col="Tahun", 
+            title="Total Sampah per Kecamatan",
+            labels={"Netto_kg": "Total Sampah (kg)", "Kecamatan": "Kecamatan"}
+        )
+        st.plotly_chart(fig_bar_kecamatan, use_container_width=True)
 
-        yearly_actual = df_pred_yearly.groupby('tahun')['aktual'].sum()
-        yearly_pred = df_pred_yearly.groupby('tahun')['prediksi'].sum()
+        # Distribusi musim
+        st.markdown("### Distribusi Sampah per Musim")
+        musim_data = filtered_data.groupby(["Musim"], as_index=False).agg({"Netto_kg": "sum"})
+        fig_musim = px.pie(
+            musim_data, names="Musim", values="Netto_kg", 
+            title="Distribusi Sampah per Musim", 
+            color_discrete_sequence=px.colors.sequential.RdBu
+        )
+        st.plotly_chart(fig_musim, use_container_width=True)
 
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(yearly_actual.index, yearly_actual.values, label="Aktual", marker='o', linestyle='-', color='blue')
-        ax.plot(yearly_pred.index, yearly_pred.values, label="Prediksi", marker='o', linestyle='-', color='orange')
+        # Boxplot per jenis_sampah
+        st.markdown("### Boxplot per Jenis Sampah dan Suplier")
+        fig_boxplot = px.box(
+            filtered_data, x="jenis_sampah", y="Netto_kg", color="Suplier", 
+            facet_col="Tahun", title="Boxplot per Jenis Sampah dan Suplier",
+            labels={"jenis_sampah": "Jenis Sampah", "Netto_kg": "Netto (kg)"}
+        )
+        st.plotly_chart(fig_boxplot, use_container_width=True)
 
-        ax.set_title(f"Prediksi vs Aktual Volume Sampah per Tahun ({selected_year})")
-        ax.set_xlabel("Tahun")
-        ax.set_ylabel("Volume Sampah (kg)")
-        ax.legend()
-        st.pyplot(fig)
+        # Prediction
+        if run_prediction:
+            st.markdown("### Prediksi Volume Sampah")
+            prediction_data = (
+                filtered_data.groupby(["Tahun", "Bulan"], as_index=False)
+                .agg({"Netto_kg": "sum"})
+            )
+            scaler = MinMaxScaler()
+            scaled_data = scaler.fit_transform(prediction_data[["Netto_kg"]])
 
-    elif period_choice == "Hari":
-        df_pred_daily = df_pred.copy()
-        df_pred_daily['hari'] = df_pred_daily['tanggal'].dt.date
+            # Prepare input sequence
+            window_size = 12
+            if len(scaled_data) >= window_size:
+                input_sequence = np.array([scaled_data[-window_size:]])
+                model = load_keras_model(model_type)
+                predictions = []
+                for _ in range(months_to_predict):
+                    pred = model.predict(input_sequence)
+                    predictions.append(pred[0][0])
+                    pred_reshaped = np.reshape(pred, (1, 1, -1))
+                    input_sequence = np.append(input_sequence[:, 1:, :], pred_reshaped, axis=1)
 
-        daily_actual = df_pred_daily.groupby('hari')['aktual'].sum()
-        daily_pred = df_pred_daily.groupby('hari')['prediksi'].sum()
+                # Rescale predictions
+                predictions_rescaled = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+                
+                # Generate valid future dates
+                start_date = pd.Timestamp(year=prediction_years[0], month=1, day=1)
+                pred_dates = pd.date_range(start=start_date, periods=months_to_predict, freq="M")
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(daily_actual.index, daily_actual.values, label="Aktual", color='blue')
-        ax.plot(daily_pred.index, daily_pred.values, label="Prediksi", color='orange')
-
-        ax.set_title(f"Prediksi vs Aktual Volume Sampah per Hari ({selected_year})")
-        ax.set_xlabel("Tanggal")
-        ax.set_ylabel("Volume Sampah (kg)")
-        ax.legend()
-        st.pyplot(fig)
-
-    # ================================
-    # Evaluasi Model
-    # ================================
-    mse = mean_squared_error(y_actual, y_pred)
-    mae = mean_absolute_error(y_actual, y_pred)
-
-    st.header("Evaluasi Model")
-    st.metric("MSE (Mean Squared Error)", f"{mse:.2f}")
-    st.metric("MAE (Mean Absolute Error)", f"{mae:.2f}")
-
-    # ================================
-    # Klasifikasi Musim (Kemarau & Hujan)
-    # ================================
-    df_pred['musim'] = df_pred['bulan'].apply(lambda x: 'Hujan' if x in [11, 12, 1, 2, 3, 4] else 'Kemarau')
-
-    seasonal_actual = df_pred.groupby('musim')['aktual'].sum()
-    seasonal_pred = df_pred.groupby('musim')['prediksi'].sum()
-
-    heatmap_data = pd.DataFrame({
-        'Aktual': seasonal_actual,
-        'Prediksi': seasonal_pred
-    })
-
-    st.header("Heatmap Perbandingan Volume Sampah (Musim Hujan vs Kemarau)")
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.heatmap(heatmap_data.T, annot=True, cmap='YlGnBu', fmt='.2f', cbar=True, ax=ax)
-    ax.set_title(f"Perbandingan Volume Sampah (Aktual vs Prediksi) per Musim - Tahun {selected_year}")
-    st.pyplot(fig)
+                # Create prediction DataFrame
+                prediction_df = pd.DataFrame({"Tanggal": pred_dates, "Prediksi_Netto_kg": predictions_rescaled.flatten()})
+                
+                # Show predictions
+                fig_prediction = px.line(
+                    prediction_df, x="Tanggal", y="Prediksi_Netto_kg", 
+                    title="Prediksi Volume Sampah",
+                    labels={"Prediksi_Netto_kg": "Prediksi Netto (kg)", "Tanggal": "Tanggal"},
+                    color_discrete_sequence=["#17BECF"]
+                )
+                st.plotly_chart(fig_prediction, use_container_width=True)
+                st.table(prediction_df)
+            else:
+                st.warning("Data tidak cukup untuk melakukan prediksi.")
