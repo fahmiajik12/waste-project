@@ -29,7 +29,7 @@ st.markdown(
 # Sidebar
 st.sidebar.markdown('<div class="sidebar-title">EDA Sampah Dashboard</div>', unsafe_allow_html=True)
 uploaded_file = st.sidebar.file_uploader("Upload File Excel (.xlsx)", type="xlsx")
-model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN", "XGBoost", "Random Forest"])
+model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "GRU"])
 prediction_years = st.sidebar.multiselect("Tahun Prediksi", options=[2022, 2023, 2024, 2025, 2026], default=[2025])
 months_to_predict = st.sidebar.slider("Jumlah Bulan Prediksi", min_value=1, max_value=24, value=12)
 run_prediction = st.sidebar.button("Jalankan Prediksi")
