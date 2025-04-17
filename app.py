@@ -29,7 +29,6 @@ st.markdown(
 # Sidebar
 st.sidebar.markdown('<div class="sidebar-title">EDA Sampah Dashboard</div>', unsafe_allow_html=True)
 uploaded_file = st.sidebar.file_uploader("Upload File Excel (.xlsx)", type="xlsx")
-model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN"])
 prediction_years = st.sidebar.multiselect("Tahun Prediksi", options=[2022, 2023, 2024, 2025, 2026], default=[2025])
 months_to_predict = st.sidebar.slider("Jumlah Bulan Prediksi", min_value=1, max_value=24, value=12)
 run_prediction = st.sidebar.button("Jalankan Prediksi")
@@ -63,8 +62,20 @@ def filter_data(data, years, jenis_sampah):
     return data
 
 # load Keras model
+# Sidebar
+model_type = st.sidebar.selectbox("Pilih Model", ["LSTM", "RNN", "GRU"])
+
+# Load Keras model
 def load_keras_model(model_type):
-    model_path = "best_lstm_model.h5" if model_type == "LSTM" else "best_gru_model.h5"
+    if model_type == "LSTM":
+        model_path = "best_lstm_model.h5"
+    elif model_type == "RNN":
+        model_path = "best_rnn_model.h5"
+    elif model_type == "GRU":
+        model_path = "best_gru_model.h5"  
+    else:
+        st.error("Model tidak dikenali.")
+        return None
     model = load_model(model_path, compile=False)
     model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mean_squared_error"])
     return model
